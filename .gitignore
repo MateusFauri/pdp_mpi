@@ -53,3 +53,9 @@ dkms.conf
 
 # debug information files
 *.dwo
+
+
+# ignore executables generated in the mpi 
+mpi_coletiva
+mpi_p2p_bloqueante
+mpi_p2p_naobloqueante
