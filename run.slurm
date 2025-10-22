@@ -42,10 +42,6 @@ function gerar_machinefile_parcial() {
 }
 
 for versao in "${VERSOES[@]}"; do
-    echo "=============================="
-    echo "Executando versão: $versao"
-    echo "=============================="
-
     for nproc in "${PROCESS_SETS[@]}"; do
         for size in "${MATRIZES[@]}"; do
 
@@ -58,7 +54,6 @@ for versao in "${VERSOES[@]}"; do
             fi
 
             MACHINE_SUBSET=$(gerar_machinefile_parcial $n_maquinas)
-            echo ">>> ${versao} | N=${size} | np=${nproc} | máquinas=${n_maquinas}"
 
             OUTPUT=$(mpirun -np $nproc \
                 -machinefile $MACHINE_SUBSET \
@@ -67,19 +62,18 @@ for versao in "${VERSOES[@]}"; do
                 --bind-to none \
                 ./$versao $size)
 
-            TEMPO_TOTAL=$(echo "$OUTPUT" | grep "Execution time" | awk '{print $3}')
+            RESULT_LINE=$(echo "$OUTPUT" | grep "^$versao")
 
-            TEMPO_COMUNIC=$(echo "$OUTPUT" | grep "Tempo comunicacao" | awk '{print $4}')
-            TEMPO_COMP=$(echo "$OUTPUT" | grep "Tempo computacao" | awk '{print $4}')
-
-            echo "$versao,$nproc,$n_maquinas,$size,$TEMPO_TOTAL,$TEMPO_COMUNIC,$TEMPO_COMP" >> $RESULTS_FILE
+            if [ -n "$RESULT_LINE" ]; then
+                echo "$RESULT_LINE" >> $RESULTS_FILE
+            else
+                echo "$versao,$nproc,$n_maquinas,$size,ERROR,ERROR,ERROR" >> $RESULTS_FILE
+            fi
         done
     done
 done
 
-SAVE_NAME="mpi_experimentos_$(date +%Y%m%d_%H%M%S).tgz"
+SAVE_NAME="mpi_exp.tgz"
 
 tar czf $SAVE_NAME --exclude=.git --exclude=*.tgz .
 mv $SAVE_NAME $SAVE_DIR/
-
-echo " Job finalizado! Resultados em $RESULTS_FILE"
