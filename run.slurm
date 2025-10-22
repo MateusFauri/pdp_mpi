@@ -3,79 +3,85 @@
 #SBATCH --partition=hype
 #SBATCH --nodes=4
 #SBATCH --ntasks=160
-#SBATCH --time=04:00:00
+#SBATCH --time=06:00:00
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
-SAVE_DIR=$HOME          
-EXEC_DIR=$SCRATCH       
-REPO_URL="https://github.com/MateusFauri/pdp_mpi.git"
+export PRTE_MCA_ras_slurm_use_entire_allocation=1
+export PRTE_MCA_ras_base_launch_orted_on_hn=1
 
-mkdir -p $EXEC_DIR
-cd $EXEC_DIR || { echo "Falha ao entrar em $EXEC_DIR"; exit 1; }
+CODE_DIR=$(pwd)
+make clean
+make
 
-echo ">> Verificando MPI..."
-if ! command -v mpicc &> /dev/null; then
-    echo "mpicc não encontrado no PATH. Configure manualmente ou carregue o módulo MPI."
-    exit 1
-fi
+OUTPUT_DIR="pdp_mpi_outs"
+mkdir -p $OUTPUT_DIR
 
-echo ">> Clonando repositório..."
-rm -rf pdp_run
-git clone --depth 1 $REPO_URL pdp_run || { echo "Falha no git clone"; exit 1; }
-
-cd pdp_run || exit 1
-
-echo ">> Compilando programas MPI..."
-make clean || true
-make || { echo "Falha no make"; exit 1; }
-
-RESULTS_FILE="resultados_mpi.csv"
-MACHINEFILE="nodes.$SLURM_JOB_ID"
-echo "versao,n_processos,n_maquinas,tamanho,tempo_total,tempo_comunicacao,tempo_computacao" > $RESULTS_FILE
-
-srun -l hostname | sort -n | awk '{print $2}' > $MACHINEFILE
-NODES=($(cat $MACHINEFILE))
-
-VERSOES=("mpi_coletiva" "mpi_p2p_bloqueante" "mpi_p2p_naobloqueante")
-MATRIZES=(512 1024 2048 4096)
+declare -a MATRIX_SIZES=("1024" "2048" "4096" "8192")
+declare -a PROCESS_TYPES=("coletiva" "p2p_bloqueante" "p2p_naobloqueante")
+MAX_PROCS=$SLURM_NTASKS
+MAX_NODES=$SLURM_JOB_NUM_NODES
 PROCESS_SETS=(1 2 4 8 20 40 80 120 160)
 
-gerar_machinefile_parcial() {
-    local n_nodes=$1
-    local filename="machinefile_${n_nodes}.txt"
-    head -n $n_nodes $MACHINEFILE > $filename
-    echo $filename
+
+overall_start=$(date +%s.%N)
+
+generate_machinefile() {
+    local nodes=$1
+    local procs=$2
+    local file=$3
+    srun -l hostname | sort -n | awk '{print $2}' | head -n $nodes | while read node; do
+        for ((i=0;i<$procs;i++)); do
+            echo $node
+        done
+    done > $file
 }
 
-for versao in "${VERSOES[@]}"; do
-    for nproc in "${PROCESS_SETS[@]}"; do
-        for size in "${MATRIZES[@]}"; do
-            if [ $nproc -le 40 ]; then
-                n_maquinas=1
-            elif [ $nproc -le 80 ]; then
-                n_maquinas=2
-            else
-                n_maquinas=4
-            fi
 
-            MACHINE_SUBSET=$(gerar_machinefile_parcial $n_maquinas)
+for num_procs in "${PROCESS_SETS[@]}"; do
+    nodes_used=$(( num_procs < MAX_NODES ? num_procs : MAX_NODES ))
+    
+    if [ $num_procs -eq 2 ]; then
+        nodes_options=(1 2)
+    else
+        nodes_options=($nodes_used)
+    fi
 
-            OUTPUT=$(mpirun -np $nproc \
-                -machinefile $MACHINE_SUBSET \
-                --bind-to none \
-                ./$versao $size $n_maquinas)
+    for nodes_to_use in "${nodes_options[@]}"; do
+        procs_per_node=$(( (num_procs + nodes_to_use -1)/nodes_to_use ))
+        MACHINEFILE="nodes_${num_procs}procs_${nodes_to_use}nodes.$SLURM_JOB_ID"
+        generate_machinefile $nodes_to_use $procs_per_node $MACHINEFILE
 
-            RESULT_LINE=$(echo "$OUTPUT" | grep "^$versao")
-            if [ -n "$RESULT_LINE" ]; then
-                echo "$RESULT_LINE" >> $RESULTS_FILE
-            else
-                echo "$versao,$nproc,$n_maquinas,$size,ERROR,ERROR,ERROR" >> $RESULTS_FILE
-            fi
+        for matrix_size in "${MATRIX_SIZES[@]}"; do
+            for process_type in "${PROCESS_TYPES[@]}"; do
+                echo "----------------------------------------"
+                echo "Process type: $process_type"
+                echo "Matrix size: $matrix_size"
+                echo "Num processes: $num_procs on $nodes_to_use nodes"
+                start_time=$(date +%s.%N)
+
+                mpirun -np $num_procs \
+                       -machinefile $MACHINEFILE \
+                       --mca btl ^openib \
+                       --mca btl_tcp_if_include eno2 \
+                       --bind-to none \
+                       $CODE_DIR/mpi_$process_type $matrix_size
+
+                exit_code=$?
+                end_time=$(date +%s.%N)
+                elapsed=$(echo "$end_time - $start_time" | bc)
+
+                if [ $exit_code -ne 0 ]; then
+                    echo "ERRO: $process_type com matriz $matrix_size e $num_procs processos falhou ($exit_code) após $elapsed s"
+                    continue
+                fi
+
+                echo "Concluído: $process_type com matriz $matrix_size e $num_procs processos em $elapsed s"
+                echo "----------------------------------------"
+            done
         done
     done
 done
 
-SAVE_NAME="mpi_exp_pesado_$(date +%Y%m%d_%H%M%S).tgz"
-tar czf $SAVE_NAME --exclude=.git --exclude=*.tgz .
-mv $SAVE_NAME $SAVE_DIR/
+overall_end=$(date +%s.%N)
+total_elapsed=$(echo "$overall_end - $overall_start" | bc)
