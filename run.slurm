@@ -31,8 +31,8 @@ NODES=($(cat $MACHINEFILE))
 echo "versao,n_processos,n_maquinas,tamanho,tempo_total,tempo_comunicacao,tempo_computacao" > $RESULTS_FILE
 
 VERSOES=("mpi_coletiva" "mpi_p2p_bloqueante" "mpi_p2p_naobloqueante")
-MATRIZES=(512 1024 2048)
-PROCESS_SETS=(1 2 40 80 120 160)
+MATRIZES=(512 1024 2048 4096 8192)
+PROCESS_SETS=(1 2 4 8 20 40 80 120 160)
 
 function gerar_machinefile_parcial() {
     local n_nodes=$1
@@ -60,7 +60,7 @@ for versao in "${VERSOES[@]}"; do
                 --mca btl ^openib \
                 --mca btl_tcp_if_include eno2 \
                 --bind-to none \
-                ./$versao $size)
+                ./$versao $size $n_maquinas)
 
             RESULT_LINE=$(echo "$OUTPUT" | grep "^$versao")
 
@@ -73,7 +73,6 @@ for versao in "${VERSOES[@]}"; do
     done
 done
 
-SAVE_NAME="mpi_exp.tgz"
-
+SAVE_NAME="mpi_exp_pesado_$(date +%Y%m%d_%H%M%S).tgz"
 tar czf $SAVE_NAME --exclude=.git --exclude=*.tgz .
 mv $SAVE_NAME $SAVE_DIR/
