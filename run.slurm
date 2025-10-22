@@ -11,30 +11,37 @@ SAVE_DIR=$HOME
 EXEC_DIR=$SCRATCH       
 REPO_URL="https://github.com/MateusFauri/pdp_mpi.git"
 
-echo ">> Diretório de execução: $EXEC_DIR"
-cd $EXEC_DIR
+mkdir -p $EXEC_DIR
+cd $EXEC_DIR || { echo "Falha ao entrar em $EXEC_DIR"; exit 1; }
 
-module load mpi
+echo ">> Verificando MPI..."
+if ! command -v mpicc &> /dev/null; then
+    echo "mpicc não encontrado no PATH. Configure manualmente ou carregue o módulo MPI."
+    exit 1
+fi
 
-rm -rf ./pdp_run
-git clone --depth 1 $REPO_URL ./pdp_run
-cd ./pdp_run
+echo ">> Clonando repositório..."
+rm -rf pdp_run
+git clone --depth 1 $REPO_URL pdp_run || { echo "Falha no git clone"; exit 1; }
 
-make clean && make
+cd pdp_run || exit 1
+
+echo ">> Compilando programas MPI..."
+make clean || true
+make || { echo "Falha no make"; exit 1; }
 
 RESULTS_FILE="resultados_mpi.csv"
 MACHINEFILE="nodes.$SLURM_JOB_ID"
+echo "versao,n_processos,n_maquinas,tamanho,tempo_total,tempo_comunicacao,tempo_computacao" > $RESULTS_FILE
 
 srun -l hostname | sort -n | awk '{print $2}' > $MACHINEFILE
 NODES=($(cat $MACHINEFILE))
 
-echo "versao,n_processos,n_maquinas,tamanho,tempo_total,tempo_comunicacao,tempo_computacao" > $RESULTS_FILE
-
 VERSOES=("mpi_coletiva" "mpi_p2p_bloqueante" "mpi_p2p_naobloqueante")
-MATRIZES=(512 1024 2048 4096 8192)
+MATRIZES=(512 1024 2048 4096)
 PROCESS_SETS=(1 2 4 8 20 40 80 120 160)
 
-function gerar_machinefile_parcial() {
+gerar_machinefile_parcial() {
     local n_nodes=$1
     local filename="machinefile_${n_nodes}.txt"
     head -n $n_nodes $MACHINEFILE > $filename
@@ -44,7 +51,6 @@ function gerar_machinefile_parcial() {
 for versao in "${VERSOES[@]}"; do
     for nproc in "${PROCESS_SETS[@]}"; do
         for size in "${MATRIZES[@]}"; do
-
             if [ $nproc -le 40 ]; then
                 n_maquinas=1
             elif [ $nproc -le 80 ]; then
@@ -57,13 +63,10 @@ for versao in "${VERSOES[@]}"; do
 
             OUTPUT=$(mpirun -np $nproc \
                 -machinefile $MACHINE_SUBSET \
-                --mca btl ^openib \
-                --mca btl_tcp_if_include eno2 \
                 --bind-to none \
                 ./$versao $size $n_maquinas)
 
             RESULT_LINE=$(echo "$OUTPUT" | grep "^$versao")
-
             if [ -n "$RESULT_LINE" ]; then
                 echo "$RESULT_LINE" >> $RESULTS_FILE
             else
