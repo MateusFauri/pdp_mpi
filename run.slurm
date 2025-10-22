@@ -10,11 +10,15 @@
 export PRTE_MCA_ras_slurm_use_entire_allocation=1
 export PRTE_MCA_ras_base_launch_orted_on_hn=1
 
-CODE_DIR=$(pwd)
+SCRATCH_DIR=$SCRATCH/pdp_mpi
+rm -rf $SCRATCH_DIR
+git clone --depth 1 https://github.com/MateusFauri/pdp_mpi.git $SCRATCH_DIR
+cd $SCRATCH_DIR
+
 make clean
 make
 
-OUTPUT_DIR="pdp_mpi_outs"
+OUTPUT_DIR="$SCRATCH_DIR/pdp_mpi_outs"
 mkdir -p $OUTPUT_DIR
 
 declare -a MATRIX_SIZES=("1024" "2048" "4096" "8192")
@@ -65,7 +69,7 @@ for num_procs in "${PROCESS_SETS[@]}"; do
                        --mca btl ^openib \
                        --mca btl_tcp_if_include eno2 \
                        --bind-to none \
-                       $CODE_DIR/mpi_$process_type $matrix_size
+                       $SCRATCH_DIR/mpi_$process_type $matrix_size
 
                 exit_code=$?
                 end_time=$(date +%s.%N)
