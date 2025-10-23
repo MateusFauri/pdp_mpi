@@ -3,77 +3,103 @@ import re
 import pandas as pd
 import matplotlib.pyplot as plt
 
-RESULTS_DIR = "pdp_mpi_outs"
-OUTPUT_DIR = "pdp_mpi_plots"
+# Diretório onde estão os arquivos de saída
+OUTPUT_DIR = "pdp_mpi_outs"
 
-os.makedirs(OUTPUT_DIR, exist_ok=True)
-
-regex_line = re.compile(
-    r"Finished running (\w+) with matrix size (\d+) and (\d+) processes after ([\d\.]+) seconds"
+# Expressão regular para capturar informações básicas do nome do arquivo
+# Formato esperado: mpi_{tipo}_{tamanho}_{nprocs}_{cfg}_{jobid}.out
+FILENAME_PATTERN = re.compile(
+    r"mpi_(?P<tipo>\w+)_(?P<tamanho>\d+)_(?P<nprocs>\d+)_"
 )
 
-records = []
+# Expressão regular para capturar tempo de execução (exemplo de saída)
+# Ajuste conforme a saída do seu programa MPI
+TIME_PATTERN = re.compile(
+    r"(Tempo\s*total|Execution\s*time|Elapsed\s*time)\s*[:=]\s*(\d+\.?\d*)"
+)
 
-for fname in os.listdir(RESULTS_DIR):
-    if not fname.endswith(".out"):
-        continue
-    fpath = os.path.join(RESULTS_DIR, fname)
-    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            match = regex_line.search(line)
-            if match:
-                process_type = match.group(1)
-                matrix_size = int(match.group(2))
-                num_procs = int(match.group(3))
-                time_sec = float(match.group(4))
-                records.append({
-                    "process_type": process_type,
-                    "matrix_size": matrix_size,
-                    "num_procs": num_procs,
-                    "time_sec": time_sec,
-                })
-
-if not records:
-    print("Nenhum resultado encontrado em", RESULTS_DIR)
-    exit()
-
-df = pd.DataFrame(records)
-df.sort_values(by=["process_type", "matrix_size", "num_procs"], inplace=True)
-print("Total de resultados:", len(df))
-print(df.head())
-
-for (matrix_size, process_type), subset in df.groupby(["matrix_size", "process_type"]):
-    plt.figure(figsize=(8,5))
-    plt.plot(subset["num_procs"], subset["time_sec"], marker='o')
-    plt.title(f"Tempo x Nº de Processos\n{process_type} - Matriz {matrix_size}")
-    plt.xlabel("Número de processos")
-    plt.ylabel("Tempo (s)")
-    plt.grid(True)
-    plt.tight_layout()
-
-    outpath = os.path.join(OUTPUT_DIR, f"time_{process_type}_{matrix_size}.png")
-    plt.savefig(outpath)
-    plt.close()
-
-for matrix_size, subset in df.groupby("matrix_size"):
-    plt.figure(figsize=(8,5))
-    for process_type, group in subset.groupby("process_type"):
-        base_time = group[group["num_procs"] == 1]["time_sec"].min()
-        if pd.isna(base_time):
+def extrair_resultados():
+    resultados = []
+    for filename in os.listdir(OUTPUT_DIR):
+        if not filename.endswith(".out"):
             continue
-        group = group.sort_values("num_procs")
-        speedup = base_time / group["time_sec"]
-        plt.plot(group["num_procs"], speedup, marker='o', label=process_type)
+        
+        match = FILENAME_PATTERN.search(filename)
+        if not match:
+            continue
+        
+        tipo = match.group("tipo")
+        tamanho = int(match.group("tamanho"))
+        nprocs = int(match.group("nprocs"))
+        
+        tempo_exec = None
+        with open(os.path.join(OUTPUT_DIR, filename), "r") as f:
+            conteudo = f.read()
+            tempo_match = TIME_PATTERN.search(conteudo)
+            if tempo_match:
+                tempo_exec = float(tempo_match.group(2))
+        
+        if tempo_exec is not None:
+            resultados.append({
+                "tipo": tipo,
+                "tamanho_matriz": tamanho,
+                "num_processos": nprocs,
+                "tempo_exec": tempo_exec
+            })
 
-    plt.title(f"Speedup x Nº de Processos - Matriz {matrix_size}")
-    plt.xlabel("Número de processos")
-    plt.ylabel("Speedup (T1 / Tp)")
+    return pd.DataFrame(resultados)
+
+def gerar_graficos(df: pd.DataFrame):
+    if df.empty:
+        print("Nenhum resultado encontrado!")
+        return
+    
+    os.makedirs("graficos_mpi", exist_ok=True)
+    
+    # Gráfico 1: Tempo x Num. de Processos (por tipo e tamanho)
+    for tamanho in sorted(df["tamanho_matriz"].unique()):
+        plt.figure()
+        subset = df[df["tamanho_matriz"] == tamanho]
+        for tipo in subset["tipo"].unique():
+            tipo_data = subset[subset["tipo"] == tipo]
+            plt.plot(tipo_data["num_processos"], tipo_data["tempo_exec"],
+                     marker='o', label=tipo)
+        plt.title(f"Tempo de Execução x Nº de Processos (Matriz {tamanho}x{tamanho})")
+        plt.xlabel("Número de Processos")
+        plt.ylabel("Tempo de Execução (s)")
+        plt.legend()
+        plt.grid(True)
+        plt.savefig(f"graficos_mpi/tempo_vs_procs_{tamanho}.png")
+        plt.close()
+    
+    # Gráfico 2: Speedup (comparado a execução com 1 processo)
+    plt.figure()
+    for tipo in df["tipo"].unique():
+        tipo_data = df[df["tipo"] == tipo]
+        for tamanho in tipo_data["tamanho_matriz"].unique():
+            subset = tipo_data[tipo_data["tamanho_matriz"] == tamanho].sort_values("num_processos")
+            tempo_serial = subset[subset["num_processos"] == 1]["tempo_exec"].min()
+            if pd.notna(tempo_serial):
+                subset["speedup"] = tempo_serial / subset["tempo_exec"]
+                plt.plot(subset["num_processos"], subset["speedup"],
+                         marker='o', label=f"{tipo} ({tamanho}x{tamanho})")
+    plt.title("Speedup x Nº de Processos")
+    plt.xlabel("Número de Processos")
+    plt.ylabel("Speedup")
     plt.legend()
     plt.grid(True)
-    plt.tight_layout()
-
-    outpath = os.path.join(OUTPUT_DIR, f"speedup_{matrix_size}.png")
-    plt.savefig(outpath)
+    plt.savefig("graficos_mpi/speedup.png")
     plt.close()
 
-print(f"Gráficos gerados em: {OUTPUT_DIR}/")
+def main():
+    df = extrair_resultados()
+    if df.empty:
+        print("Nenhum dado extraído. Verifique se os arquivos .out contêm o tempo de execução.")
+        return
+    print("Resumo dos resultados:")
+    print(df)
+    gerar_graficos(df)
+    print("Gráficos salvos em ./graficos_mpi/")
+
+if __name__ == "__main__":
+    main()
