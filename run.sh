@@ -4,8 +4,8 @@ export PRTE_MCA_ras_slurm_use_entire_allocation=1
 export PRTE_MCA_ras_base_launch_orted_on_hn=1
 
 CODE_DIR=$(pwd)
-JOBS_DIR="$CODE_DIR/pdp_mpi_jobs"
-OUTPUT_DIR="$CODE_DIR/pdp_mpi_outs"
+JOBS_DIR="pdp_mpi_jobs"
+OUTPUT_DIR="pdp_mpi_outs"
 
 rm -rf "$JOBS_DIR"
 mkdir -p "$JOBS_DIR" "$OUTPUT_DIR"
@@ -101,14 +101,14 @@ echo \"# Finished running $process_type with matrix size $matrix_size and $num_p
 echo \"# ----------------------------------------\" >&2
 "
 
-        temp_job_file="$JOBS_DIR/${slurm_job_name}.slurm"
+        temp_job_file="./$JOBS_DIR/${slurm_job_name}.slurm"
         echo "$job_file" > "$temp_job_file"
 
         if [ "$1" == "--launch" ]; then
-            cd "$OUTPUT_DIR"
+            cd $OUTPUT_DIR
             echo "Submitting job: $slurm_job_name"
             sbatch "../$temp_job_file"
-            cd "$CODE_DIR"
+            cd ..
         else
             echo "Dry run: Would submit job: $slurm_job_name"
         fi
@@ -116,5 +116,6 @@ echo \"# ----------------------------------------\" >&2
   done
 done
 
+echo "All tasks launched completed."
 elapsed=$(echo "$(date +%s.%N) - $overall_start" | bc)
-echo "All tasks processed. Time elapsed: $elapsed seconds"
+echo "Time elapsed: $elapsed seconds"
