@@ -1,63 +1,79 @@
+import os
+import re
 import pandas as pd
 import matplotlib.pyplot as plt
-import seaborn as sns
-import os
 
-RESULTS_FILE = "resultados_mpi.csv"
-OUTPUT_DIR = "graficos_network"
+RESULTS_DIR = "pdp_mpi_outs"
+OUTPUT_DIR = "pdp_mpi_plots"
+
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
-sns.set(style="whitegrid", font_scale=1.2)
-
-df = pd.read_csv(RESULTS_FILE)
-
-df["versao_legenda"] = df["versao"].replace(
-    {
-        "mpi_coletiva": "Coletiva",
-        "mpi_p2p_bloqueante": "P2P Bloqueante",
-        "mpi_p2p_naobloqueante": "P2P Não Bloqueante",
-    }
+regex_line = re.compile(
+    r"Finished running (\w+) with matrix size (\d+) and (\d+) processes after ([\d\.]+) seconds"
 )
 
+records = []
 
-def plot_metric_vs_machines(metric, ylabel, filename_suffix):
-    for n in sorted(df["tamanho"].unique()):
-        plt.figure(figsize=(8, 6))
-        subset = df[df["tamanho"] == n]
+for fname in os.listdir(RESULTS_DIR):
+    if not fname.endswith(".out"):
+        continue
+    fpath = os.path.join(RESULTS_DIR, fname)
+    with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            match = regex_line.search(line)
+            if match:
+                process_type = match.group(1)
+                matrix_size = int(match.group(2))
+                num_procs = int(match.group(3))
+                time_sec = float(match.group(4))
+                records.append({
+                    "process_type": process_type,
+                    "matrix_size": matrix_size,
+                    "num_procs": num_procs,
+                    "time_sec": time_sec,
+                })
 
-        sns.lineplot(
-            data=subset,
-            x="n_maquinas",
-            y=metric,
-            hue="versao_legenda",
-            style="versao_legenda",
-            markers=True,
-            dashes=False,
-        )
+if not records:
+    print("Nenhum resultado encontrado em", RESULTS_DIR)
+    exit()
 
-        plt.title(f"{ylabel} vs Número de Máquinas (Matriz {n}x{n})")
-        plt.xlabel("Número de Máquinas")
-        plt.ylabel(ylabel)
-        plt.xticks([1, 2, 4])
-        plt.legend(title="Versão")
-        plt.tight_layout()
+df = pd.DataFrame(records)
+df.sort_values(by=["process_type", "matrix_size", "num_procs"], inplace=True)
+print("Total de resultados:", len(df))
+print(df.head())
 
-        filename = os.path.join(OUTPUT_DIR, f"{filename_suffix}_{n}.png")
-        plt.savefig(filename, dpi=300)
-        plt.close()
-        print(f"Gráfico salvo: {filename}")
+for (matrix_size, process_type), subset in df.groupby(["matrix_size", "process_type"]):
+    plt.figure(figsize=(8,5))
+    plt.plot(subset["num_procs"], subset["time_sec"], marker='o')
+    plt.title(f"Tempo x Nº de Processos\n{process_type} - Matriz {matrix_size}")
+    plt.xlabel("Número de processos")
+    plt.ylabel("Tempo (s)")
+    plt.grid(True)
+    plt.tight_layout()
 
+    outpath = os.path.join(OUTPUT_DIR, f"time_{process_type}_{matrix_size}.png")
+    plt.savefig(outpath)
+    plt.close()
 
-plot_metric_vs_machines("tempo_total", "Tempo Total (s)", "tempo_total")
-plot_metric_vs_machines(
-    "tempo_comunicacao", "Tempo de Comunicação (s)", "tempo_comunicacao"
-)
-plot_metric_vs_machines(
-    "tempo_computacao", "Tempo de Computação (s)", "tempo_computacao"
-)
+for matrix_size, subset in df.groupby("matrix_size"):
+    plt.figure(figsize=(8,5))
+    for process_type, group in subset.groupby("process_type"):
+        base_time = group[group["num_procs"] == 1]["time_sec"].min()
+        if pd.isna(base_time):
+            continue
+        group = group.sort_values("num_procs")
+        speedup = base_time / group["time_sec"]
+        plt.plot(group["num_procs"], speedup, marker='o', label=process_type)
 
-resumo = df.groupby(["versao_legenda", "n_maquinas", "tamanho"], as_index=False).agg(
-    {"tempo_total": "mean", "tempo_comunicacao": "mean", "tempo_computacao": "mean"}
-)
-print("\nRESUMO MÉDIO POR VERSÃO / NÚMERO DE MÁQUINAS / TAMANHO:")
-print(resumo.to_string(index=False))
+    plt.title(f"Speedup x Nº de Processos - Matriz {matrix_size}")
+    plt.xlabel("Número de processos")
+    plt.ylabel("Speedup (T1 / Tp)")
+    plt.legend()
+    plt.grid(True)
+    plt.tight_layout()
+
+    outpath = os.path.join(OUTPUT_DIR, f"speedup_{matrix_size}.png")
+    plt.savefig(outpath)
+    plt.close()
+
+print(f"Gráficos gerados em: {OUTPUT_DIR}/")

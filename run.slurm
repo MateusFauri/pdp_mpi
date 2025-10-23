@@ -9,6 +9,12 @@
 
 export PRTE_MCA_ras_slurm_use_entire_allocation=1
 export PRTE_MCA_ras_base_launch_orted_on_hn=1
+export OMPI_MCA_mtl=^ofi
+export OMPI_MCA_pml=ob1
+export OMPI_MCA_btl=tcp,self
+export OMPI_MCA_btl_tcp_if_include=eno2
+
+
 
 SCRATCH_DIR=$SCRATCH/pdp_mpi
 rm -rf $SCRATCH_DIR
