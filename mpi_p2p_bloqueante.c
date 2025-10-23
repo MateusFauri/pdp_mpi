@@ -83,8 +83,8 @@ int main(int argc, char* argv[]) {
     }
 
     if (rank == 0) {
-        t_end = MPI_Wtime();
-        printf("Execution time: %.6f seconds\n", t_end - exec_start_time);
+        exec_end_time = MPI_Wtime();
+        printf("Execution time: %.6f seconds\n", exec_end_time - exec_start_time);
     }
 
     printf("Rank %d - Communication time: %.6f seconds\n", rank, comm_time);

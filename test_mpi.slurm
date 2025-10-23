@@ -1,3 +1,4 @@
+#!/bin/bash
 #SBATCH --job-name=test_mpi
 #SBATCH --partition=hype
 #SBATCH --nodes=1

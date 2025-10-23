@@ -19,7 +19,7 @@ mkdir -p "$JOBS_DIR" "$OUTPUT_DIR"
 
 echo "Usando diretório do código: $CODE_DIR"
 
-make clean && make
+(cd "$CODE_DIR" && make clean && make)
 chmod +x mpi_*  
 
 declare -a MATRIX_SIZES=("1024" "2048" "4096" "8192")
