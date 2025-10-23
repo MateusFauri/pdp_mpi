@@ -3,15 +3,15 @@
 export PRTE_MCA_ras_slurm_use_entire_allocation=1
 export PRTE_MCA_ras_base_launch_orted_on_hn=1
 
-JOBS_DIR="pdp_mpi_jobs"
+CODE_DIR=$(pwd)
+JOBS_DIR="$CODE_DIR/pdp_mpi_jobs"
 OUTPUT_DIR="$CODE_DIR/pdp_mpi_outs"
 
 rm -rf "$JOBS_DIR"
 mkdir -p "$JOBS_DIR" "$OUTPUT_DIR"
 
-CODE_DIR=$(pwd)
 make clean
-make
+make all
 
 declare -a MATRIX_SIZES=("1024" "2048" "4096" "8192")
 declare -a PROCESS_TYPES=("coletiva" "p2p_bloqueante" "p2p_naobloqueante")
@@ -22,54 +22,25 @@ calc_nodes_needed() {
     echo $(( (tasks + 39) / 40 ))
 }
 
-
-echo "Running MPI sbatches with the following configurations:"
-echo "----------------------------------------"
-echo "MACHINEFILE: $MACHINEFILE"
+echo "Running MPI sbatches to compare algorithm scaling:"
 echo "MATRIX_SIZES: ${MATRIX_SIZES[@]}"
 echo "NUM_PROCS: ${NUM_PROCS[@]}"
 echo "PROCESS_TYPES: ${PROCESS_TYPES[@]}"
 echo "----------------------------------------"
-echo ""
 
 overall_start=$(date +%s.%N)
+
 for process_type in "${PROCESS_TYPES[@]}"; do
   for matrix_size in "${MATRIX_SIZES[@]}"; do
     for num_procs in "${NUM_PROCS[@]}"; do
 
-      if [[ "$num_procs" -eq 1 ]]; then
-        configs=("1x1")
-      elif [[ "$num_procs" -eq 2 ]]; then
-        configs=("2x1" "2x2")
-      else
-        configs=("auto")
-      fi
+        nodes=$(calc_nodes_needed $num_procs)
+        tasks_per_node=$(( (num_procs + nodes - 1) / nodes ))
 
-      for cfg in "${configs[@]}"; do
-        case $cfg in
-          "1x1")
-            nodes=1
-            tasks_per_node=1
-            ;;
-          "2x1")
-            nodes=1
-            tasks_per_node=2
-            ;;
-          "2x2")
-            nodes=2
-            tasks_per_node=1
-            ;;
-          "auto")
-            nodes=$(calc_nodes_needed $num_procs)
-            tasks_per_node=$(( (num_procs + nodes - 1) / nodes ))
-            ;;
-        esac
-
-        slurm_job_name="mpi_${process_type}_${matrix_size}_${num_procs}_${cfg}"
+        slurm_job_name="mpi_${process_type}_${matrix_size}_${num_procs}"
         slurm_time_limit="2:00:00"
 
-read -r -d '' job_file <<EOF
-#!/bin/bash
+        job_file="#!/bin/bash
 #SBATCH --job-name=$slurm_job_name
 #SBATCH --partition=hype
 #SBATCH --nodes=$nodes
@@ -79,56 +50,71 @@ read -r -d '' job_file <<EOF
 #SBATCH --output=%x_%j.out
 #SBATCH --error=%x_%j.err
 
-echo "# ----------------------------------------"
-echo "# Job ID: \$SLURM_JOB_ID"
-echo "# Job Name: $slurm_job_name"
-echo "# Tipo: $process_type"
-echo "# Tamanho da matriz: $matrix_size"
-echo "# Num procs: $num_procs"
-echo "# Nodes: $nodes"
-echo "# Tasks/node: $tasks_per_node"
-echo "# ----------------------------------------"
+MACHINEFILE=\"nodes.\$SLURM_JOB_ID\"
+srun -l hostname | sort -n | awk '{print \$2}' > \$MACHINEFILE
 
-cd $CODE_DIR
-echo "Executando em diretório: \$(pwd)"
+echo \"# ----------------------------------------\"
+echo \"# job id: \$SLURM_JOB_ID\"
+echo \"# job name: $slurm_job_name\"
+echo \"# Running process type: $slurm_process_type\"
+echo \"# Matrix size: $slurm_matrix_size\"
+echo \"# Number of processes: $slurm_num_tasks\"
+echo \"# Number of nodes: $nodes\"
+echo \"# Tasks per node: $tasks_per_node\"
+current_time=\$(date '+%d-%m-%Y %H:%M:%S.%M')
+echo \"# Current time: \$current_time\"
+echo \"# ----------------------------------------\"
 
-if [ ! -x "./mpi_$process_type" ]; then
-  echo "Erro: executável ./mpi_$process_type não encontrado ou sem permissão!" >&2
-  exit 1
-fi
+echo \"# ----------------------------------------\" >&2
+echo \"# job id: \$SLURM_JOB_ID\" >&2
+echo \"# job name: $slurm_job_name\" >&2
+echo \"# Running process type: $slurm_process_type\" >&2
+echo \"# Matrix size: $slurm_matrix_size\" >&2
+echo \"# Number of processes: $slurm_num_tasks\" >&2
+echo \"# Number of nodes: $nodes\"
+echo \"# Tasks per node: $tasks_per_node\"
+current_time=\$(date '+%d-%m-%Y %H:%M:%S.%M') >&2
+echo \"# Current time: \$current_time\" >&2
+echo \"# ----------------------------------------\" >&2
 
-mpirun -np \$SLURM_NTASKS \
-       --mca btl ^openib \
-       --mca btl_tcp_if_include eno2 \
-       --bind-to none \
-       ./mpi_$process_type $matrix_size
-
+mpirun -np \$SLURM_NTASKS \\
+       -machinefile \$MACHINEFILE \\
+       --mca btl ^openib \\
+       --mca btl_tcp_if_include eno2 \\
+       --bind-to none -np \$SLURM_NTASKS \\
+       $CODE_DIR/mpi_$slurm_process_type $slurm_matrix_size
+       
 exit_code=\$?
 if [ \$exit_code -ne 0 ]; then
-  echo "Erro no job \$SLURM_JOB_ID: código \$exit_code" >&2
-  exit \$exit_code
+    echo \"# Error: Process $slurm_process_type with matrix size $slurm_matrix_size and $slurm_num_tasks processes failed with exit code \$exit_code after \$job_lasted seconds\"
+    echo \"# ----------------------------------------\"
+    echo \"# Error: Process $slurm_process_type with matrix size $slurm_matrix_size and $slurm_num_tasks processes failed with exit code \$exit_code after \$job_lasted seconds\" >&2
+    echo \"# ----------------------------------------\" >&2
+    exit \$exit_code
 fi
-EOF
 
-        temp_job_file="./$JOBS_DIR/${slurm_job_name}.slurm"
+
+echo \"# Finished running $process_type with matrix size $matrix_size and $num_procs processes\"
+echo \"# ----------------------------------------\"
+
+echo \"# Finished running $process_type with matrix size $matrix_size and $num_procs processes\" >&2
+echo \"# ----------------------------------------\" >&2
+"
+
+        temp_job_file="$JOBS_DIR/${slurm_job_name}.slurm"
         echo "$job_file" > "$temp_job_file"
 
-        if [ "$1" == "--launch" ]
-        then
-            cd $OUTPUT_DIR
+        if [ "$1" == "--launch" ]; then
+            cd "$OUTPUT_DIR"
             echo "Submitting job: $slurm_job_name"
             sbatch "../$temp_job_file"
-            cd ..
+            cd "$CODE_DIR"
         else
             echo "Dry run: Would submit job: $slurm_job_name"
-            echo "Would run: 'sbatch \"../$temp_job_file\"'"
-            echo "To actually submit, run with --launch option."
         fi
-      done
     done
   done
 done
 
-echo "All tasks launched completed."
 elapsed=$(echo "$(date +%s.%N) - $overall_start" | bc)
-echo "Time elapsed: $elapsed seconds"
+echo "All tasks processed. Time elapsed: $elapsed seconds"
