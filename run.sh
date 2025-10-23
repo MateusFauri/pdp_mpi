@@ -1,26 +1,17 @@
 #!/bin/bash
-#SBATCH --partition=hype
-#SBATCH --job-name=pdp_mpi_launcher
-#SBATCH --output=launcher_%j.out
-#SBATCH --error=launcher_%j.err
-#SBATCH --time=00:30:00
-#SBATCH --nodes=1
-#SBATCH --ntasks=1
 
 export PRTE_MCA_ras_slurm_use_entire_allocation=1
 export PRTE_MCA_ras_base_launch_orted_on_hn=1
 
-CODE_DIR=$(pwd)
-JOBS_DIR="$CODE_DIR/pdp_mpi_jobs"
+JOBS_DIR="pdp_mpi_jobs"
 OUTPUT_DIR="$CODE_DIR/pdp_mpi_outs"
 
 rm -rf "$JOBS_DIR"
 mkdir -p "$JOBS_DIR" "$OUTPUT_DIR"
 
-echo "Usando diretório do código: $CODE_DIR"
-
-(cd "$CODE_DIR" && make clean && make)
-chmod +x mpi_*  
+CODE_DIR=$(pwd)
+make clean
+make
 
 declare -a MATRIX_SIZES=("1024" "2048" "4096" "8192")
 declare -a PROCESS_TYPES=("coletiva" "p2p_bloqueante" "p2p_naobloqueante")
@@ -31,8 +22,17 @@ calc_nodes_needed() {
     echo $(( (tasks + 39) / 40 ))
 }
 
-overall_start=$(date +%s.%N)
 
+echo "Running MPI sbatches with the following configurations:"
+echo "----------------------------------------"
+echo "MACHINEFILE: $MACHINEFILE"
+echo "MATRIX_SIZES: ${MATRIX_SIZES[@]}"
+echo "NUM_PROCS: ${NUM_PROCS[@]}"
+echo "PROCESS_TYPES: ${PROCESS_TYPES[@]}"
+echo "----------------------------------------"
+echo ""
+
+overall_start=$(date +%s.%N)
 for process_type in "${PROCESS_TYPES[@]}"; do
   for matrix_size in "${MATRIX_SIZES[@]}"; do
     for num_procs in "${NUM_PROCS[@]}"; do
@@ -110,19 +110,25 @@ if [ \$exit_code -ne 0 ]; then
 fi
 EOF
 
-        temp_job_file="$JOBS_DIR/${slurm_job_name}.slurm"
+        temp_job_file="./$JOBS_DIR/${slurm_job_name}.slurm"
         echo "$job_file" > "$temp_job_file"
 
-        if [ "$1" == "--launch" ]; then
-          echo "Submetendo: $slurm_job_name"
-          (cd "$OUTPUT_DIR" && sbatch "../$temp_job_file")
+        if [ "$1" == "--launch" ]
+        then
+            cd $OUTPUT_DIR
+            echo "Submitting job: $slurm_job_name"
+            sbatch "../$temp_job_file"
+            cd ..
         else
-          echo "Dry run: $slurm_job_name"
+            echo "Dry run: Would submit job: $slurm_job_name"
+            echo "Would run: 'sbatch \"../$temp_job_file\"'"
+            echo "To actually submit, run with --launch option."
         fi
       done
     done
   done
 done
 
+echo "All tasks launched completed."
 elapsed=$(echo "$(date +%s.%N) - $overall_start" | bc)
-echo "Tempo total: $elapsed s"
+echo "Time elapsed: $elapsed seconds"

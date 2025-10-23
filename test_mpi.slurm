@@ -16,16 +16,19 @@ echo "# =========================="
 srun -l hostname
 
 CODE_DIR=$PWD
-cd $CODE_DIR
+cd "$CODE_DIR" || exit 1
 
-make clean && make
-chmod +x mpi_coletiva
+make clean
+make all
+
+if [ ! -f "./mpi_coletiva" ]; then
+    echo "Erro: executável ./mpi_coletiva não encontrado!" >&2
+    exit 1
+fi
+chmod +x ./mpi_coletiva
 
 echo "Rodando ./mpi_coletiva 1024 ..."
-mpirun -np $SLURM_NTASKS \
-       --mca btl ^openib \
-       --mca btl_tcp_if_include eno2 \
-       --bind-to none \
-       ./mpi_coletiva 1024
+
+srun --mpi=pmix_v3 ./mpi_coletiva 1024
 
 echo "# ======= FIM DO TESTE ======="
