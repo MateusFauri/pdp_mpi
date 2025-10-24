@@ -36,15 +36,17 @@ for process_type in "${PROCESS_TYPES[@]}"; do
 
         nodes=$(calc_nodes_needed $num_procs)
         tasks_per_node=$(( (num_procs + nodes - 1) / nodes ))
-
+        slurm_num_tasks=$num_procs
         slurm_job_name="mpi_${process_type}_${matrix_size}_${num_procs}"
         slurm_time_limit="2:00:00"
+        slurm_process_type=$process_type
+        slurm_matrix_size=$matrix_size
 
         job_file="#!/bin/bash
 #SBATCH --job-name=$slurm_job_name
 #SBATCH --partition=hype
 #SBATCH --nodes=$nodes
-#SBATCH --ntasks=$num_procs
+#SBATCH --ntasks=$slurm_num_tasks
 #SBATCH --ntasks-per-node=$tasks_per_node
 #SBATCH --time=$slurm_time_limit
 #SBATCH --output=%x_%j.out
