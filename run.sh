@@ -38,7 +38,7 @@ for process_type in "${PROCESS_TYPES[@]}"; do
         tasks_per_node=$(( (num_procs + nodes - 1) / nodes ))
         slurm_num_tasks=$num_procs
         slurm_job_name="mpi_${process_type}_${matrix_size}_${num_procs}"
-        slurm_time_limit="2:00:00"
+        slurm_time_limit="4:00:00"
         slurm_process_type=$process_type
         slurm_matrix_size=$matrix_size
 
